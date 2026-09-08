@@ -7,6 +7,7 @@ import {
 } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import type { z } from "zod/v4";
+import { logger } from "../lib/logger";
 
 function formatZodError(error: z.ZodError): string {
   return error.issues
@@ -15,6 +16,31 @@ function formatZodError(error: z.ZodError): string {
       return path ? `${path}: ${issue.message}` : issue.message;
     })
     .join("; ");
+}
+
+function databaseErrorCode(error: unknown): string {
+  // Drizzle wraps the driver's error in `cause`; never log the wrapper's SQL.
+  let current = error;
+  for (let depth = 0; depth < 5; depth++) {
+    if (!current || typeof current !== "object") break;
+    if (
+      "code" in current &&
+      typeof current.code === "string" &&
+      /^[A-Z0-9]{1,16}$/.test(current.code)
+    ) {
+      return current.code;
+    }
+    current = "cause" in current ? current.cause : undefined;
+  }
+
+  return "UNKNOWN";
+}
+
+function logDatabaseError(operation: "list" | "get" | "create" | "update" | "delete", error: unknown): void {
+  logger.error(
+    { operation, errorCode: databaseErrorCode(error) },
+    "Cut list database operation failed",
+  );
 }
 
 const router: IRouter = Router();
@@ -35,6 +61,7 @@ router.get("/cut-lists", async (_req, res) => {
 
     res.json(results);
   } catch (err) {
+    logDatabaseError("list", err);
     res.status(500).json({ error: "Database error" });
   }
 });
@@ -59,6 +86,7 @@ router.get("/cut-lists/:id", async (req, res) => {
 
     res.json(results[0]);
   } catch (err) {
+    logDatabaseError("get", err);
     res.status(500).json({ error: "Database error" });
   }
 });
@@ -87,6 +115,7 @@ router.post("/cut-lists", async (req, res) => {
 
     res.status(201).json(inserted[0]);
   } catch (err) {
+    logDatabaseError("create", err);
     res.status(500).json({ error: "Database error" });
   }
 });
@@ -128,6 +157,7 @@ router.put("/cut-lists/:id", async (req, res) => {
 
     res.json(updated[0]);
   } catch (err) {
+    logDatabaseError("update", err);
     res.status(500).json({ error: "Database error" });
   }
 });
@@ -152,6 +182,7 @@ router.delete("/cut-lists/:id", async (req, res) => {
 
     res.json({ ok: true });
   } catch (err) {
+    logDatabaseError("delete", err);
     res.status(500).json({ error: "Database error" });
   }
 });

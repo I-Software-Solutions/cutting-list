@@ -1,5 +1,5 @@
 import { useState, useCallback, useMemo } from 'react';
-import { ChevronDown, ChevronRight, Play, RotateCcw, Settings, Upload, Folder, ListFilter } from 'lucide-react';
+import { ChevronDown, ChevronRight, Play, RotateCcw, Settings, Upload, Folder, ListFilter, Layers } from 'lucide-react';
 import type { CutPiece, StockItem, Options, OptimizationResult, Mode } from './types';
 import type { Units } from './lib/units';
 import { optimizeSheets, optimizeLinear } from './lib/optimizer';
@@ -11,6 +11,10 @@ import { Toggle } from './components/Toggle';
 import { ResultPanel } from './components/ResultPanel';
 import { ImportModal } from './components/ImportModal';
 import { SavedJobsPanel, type SavedJobFull } from './components/SavedJobsPanel';
+import { NumericInput } from './components/NumericInput';
+import { isEnteredRow, validateCalculationRows } from './lib/calculationValidation';
+import { responseError } from './lib/apiError';
+import { BoardManager } from './components/BoardManager';
 
 const API_BASE = import.meta.env.BASE_URL?.replace(/\/$/, '') ?? '';
 
@@ -185,6 +189,7 @@ export default function App() {
   const [repairNotice, setRepairNotice] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [showJobs, setShowJobs] = useState(false);
+  const [showBoards, setShowBoards] = useState(false);
   const [materialFilter, setMaterialFilter] = useState('');
 
   const [savedId, setSavedId] = useState<number | null>(null);
@@ -192,6 +197,7 @@ export default function App() {
 
   const setOpt = useCallback(<K extends keyof Options>(key: K, value: Options[K]) => {
     setOptions(o => ({ ...o, [key]: value }));
+    setResult(null);
   }, []);
 
   // Distinct material codes present in the cutting list, with piece counts.
@@ -233,10 +239,18 @@ export default function App() {
     () => activeFilter ? stock.filter(s => s.material.trim() === activeFilter) : stock,
     [stock, activeFilter],
   );
+  const calculationIssues = useMemo(
+    () => validateCalculationRows(visiblePieces, visibleStock, mode, units),
+    [visiblePieces, visibleStock, mode, units],
+  );
+  const hasPreservedWidths = mode === 'linear' &&
+    [...visiblePieces, ...visibleStock].some(row => row.width.trim() !== '');
 
   // When a filter is active, edits from the tables only cover the visible rows —
   // merge them back into the full list, and give new rows the filtered material
   const handlePiecesChange = useCallback((next: CutPiece[]) => {
+    setResult(null);
+    setError(null);
     if (!activeFilter) { setPieces(next); return; }
     setPieces(prev => {
       const visibleIds = new Set(prev.filter(p => p.material.trim() === activeFilter).map(p => p.id));
@@ -248,6 +262,8 @@ export default function App() {
   }, [activeFilter]);
 
   const handleStockChange = useCallback((next: StockItem[]) => {
+    setResult(null);
+    setError(null);
     if (!activeFilter) { setStock(next); return; }
     setStock(prev => {
       const visibleIds = new Set(prev.filter(s => s.material.trim() === activeFilter).map(s => s.id));
@@ -271,7 +287,16 @@ export default function App() {
 
   const handleCalculate = useCallback(() => {
     setError(null);
+    setResult(null);
     try {
+      if (calculationIssues.length > 0) {
+        setError('Calculation blocked: fix the rows listed below. No pieces have been excluded.');
+        return;
+      }
+      if (!Number.isFinite(Number(options.kerf)) || Number(options.kerf) < 0) {
+        setError('Enter a kerf of 0 or greater.');
+        return;
+      }
       // Mixed sheet + moulding items can't be optimized together
       if (!activeFilter) {
         const kinds = new Set(materialOptions.map(([, info]) => info.linear));
@@ -280,8 +305,8 @@ export default function App() {
           return;
         }
       }
-      const validPieces = visiblePieces.filter(p => p.length.trim() !== '');
-      const validStock = visibleStock.filter(s => s.length.trim() !== '');
+      const validPieces = visiblePieces.filter(isEnteredRow);
+      const validStock = visibleStock.filter(isEnteredRow);
 
       if (validPieces.length === 0) { setError('Add at least one piece to cut.'); return; }
       if (validStock.length === 0) { setError('Add at least one stock item.'); return; }
@@ -296,7 +321,7 @@ export default function App() {
     } catch (e) {
       setError('Calculation error: ' + (e instanceof Error ? e.message : String(e)));
     }
-  }, [visiblePieces, visibleStock, options, mode, units, activeFilter, materialOptions]);
+  }, [visiblePieces, visibleStock, options, mode, units, activeFilter, materialOptions, calculationIssues]);
 
   const handleReset = useCallback(() => {
     setPieces(makeDefaultPieces());
@@ -354,6 +379,7 @@ export default function App() {
   const handleModeChange = useCallback((newMode: Mode) => {
     setMode(newMode);
     setResult(null);
+    setError(null);
     setMaterialFilter('');
   }, []);
 
@@ -366,7 +392,7 @@ export default function App() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
-    if (!res.ok) throw new Error('Save failed');
+    if (!res.ok) throw await responseError(res, 'Save failed');
     const saved = await res.json();
     setSavedId(saved.id);
     setSavedName(saved.name);
@@ -380,7 +406,7 @@ export default function App() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
-    if (!res.ok) throw new Error('Update failed');
+    if (!res.ok) throw await responseError(res, 'Update failed');
   }, [savedId, mode, units, pieces, stock, options]);
 
   const handleLoadJob = useCallback((job: SavedJobFull) => {
@@ -414,6 +440,7 @@ export default function App() {
           onConfirm={handleImportConfirm}
         />
       )}
+      <BoardManager open={showBoards} onClose={() => setShowBoards(false)} />
       {/* Top bar */}
       <header className="flex items-center justify-between px-3 py-2 bg-gray-800 text-white shrink-0">
         <div className="flex items-center gap-2">
@@ -470,6 +497,13 @@ export default function App() {
             <Folder size={13} /> Jobs
           </button>
           <button
+            className={`flex items-center gap-1.5 text-sm font-medium px-3 py-1.5 rounded transition-colors ${showBoards ? 'bg-amber-500 text-white' : 'bg-gray-700 hover:bg-gray-600 text-gray-200'}`}
+            onClick={() => setShowBoards(true)}
+            title="Manage boards"
+          >
+            <Layers size={13} /> Boards
+          </button>
+          <button
             className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium px-3 py-1.5 rounded transition-colors"
             onClick={() => setShowImport(true)}
           >
@@ -513,8 +547,28 @@ export default function App() {
 
       {/* Error bar */}
       {error && (
-        <div className="px-4 py-2 bg-red-50 border-b border-red-200 text-red-700 text-sm">
+        <div role="alert" className="px-4 py-2 bg-red-50 border-b border-red-200 text-red-700 text-sm">
           {error}
+        </div>
+      )}
+
+      {calculationIssues.length > 0 && (
+        <div
+          role="alert"
+          className="px-4 py-2 bg-amber-50 border-b border-amber-200 text-amber-900 text-sm max-h-40 overflow-y-auto shrink-0"
+          data-testid="calculation-warning"
+        >
+          <p className="font-medium">Complete these rows before calculating. Your entries are preserved; incomplete rows will not be silently excluded.</p>
+          <ul className="list-disc pl-5 mt-1">
+            {calculationIssues.map(issue => (
+              <li key={issue.key}><strong>{issue.row}:</strong> {issue.message}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {hasPreservedWidths && (
+        <div className="px-4 py-2 bg-blue-50 border-b border-blue-200 text-blue-900 text-sm shrink-0" role="status">
+          Linear (1D) uses lengths only. Widths are preserved and will reappear when you switch back to Sheets (2D).
         </div>
       )}
 
@@ -610,8 +664,9 @@ export default function App() {
           <CollapsibleSection title="Options" icon={<Settings size={12} />}>
             <div className="py-1">
               <OptionsRow label="Cut / blade / kerf thickness">
-                <input
+                <NumericInput
                   type="number"
+                  aria-label="Cut / blade / kerf thickness"
                   min="0"
                   step="0.1"
                   className="w-16 px-2 py-1 text-sm border border-input rounded bg-background text-right"

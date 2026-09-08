@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Folder, Trash2, Download, Loader2, Save, X, Check } from 'lucide-react';
+import { Folder, Trash2, Download, Loader2, Save, X, Check, RefreshCw } from 'lucide-react';
+import { errorMessage, responseError } from '@/lib/apiError';
 
 const API_BASE = import.meta.env.BASE_URL?.replace(/\/$/, '') ?? '';
 
@@ -44,17 +45,23 @@ export function SavedJobsPanel({
   const [loadingId, setLoadingId] = useState<number | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const fetchJobs = useCallback(async () => {
     setLoading(true);
-    setError(null);
+    setLoadError(null);
     try {
       const res = await fetch(`${API_BASE}/api/cut-lists`);
-      if (!res.ok) throw new Error('Failed to load saved jobs');
+      if (!res.ok) throw await responseError(res, 'Saved-jobs API request failed');
       const data: SavedJobSummary[] = await res.json();
+      if (!Array.isArray(data)) {
+        throw new Error('Saved-jobs API returned an unexpected response');
+      }
       setJobs(data.slice().reverse());
-    } catch {
-      setError('Could not load saved jobs');
+    } catch (err) {
+      setLoadError(
+        `${errorMessage(err, 'Could not reach the saved-jobs API')}. Check the API/database connection, then retry.`,
+      );
     } finally {
       setLoading(false);
     }
@@ -74,8 +81,8 @@ export function SavedJobsPanel({
       setSaveName('');
       setShowSaveInput(false);
       await fetchJobs();
-    } catch {
-      setError('Failed to save job');
+    } catch (err) {
+      setError(errorMessage(err, 'Failed to save job'));
     } finally {
       setSaving(false);
     }
@@ -87,8 +94,8 @@ export function SavedJobsPanel({
     try {
       await onUpdate();
       await fetchJobs();
-    } catch {
-      setError('Failed to update job');
+    } catch (err) {
+      setError(errorMessage(err, 'Failed to update job'));
     } finally {
       setUpdating(false);
     }
@@ -99,11 +106,11 @@ export function SavedJobsPanel({
     setError(null);
     try {
       const res = await fetch(`${API_BASE}/api/cut-lists/${job.id}`);
-      if (!res.ok) throw new Error('Failed to load job');
+      if (!res.ok) throw await responseError(res, 'Failed to load job');
       const full: SavedJobFull = await res.json();
       onLoad(full);
-    } catch {
-      setError('Failed to load job');
+    } catch (err) {
+      setError(errorMessage(err, 'Failed to load job'));
     } finally {
       setLoadingId(null);
     }
@@ -114,10 +121,10 @@ export function SavedJobsPanel({
     setError(null);
     try {
       const res = await fetch(`${API_BASE}/api/cut-lists/${id}`, { method: 'DELETE' });
-      if (!res.ok) throw new Error('Failed to delete');
+      if (!res.ok) throw await responseError(res, 'Failed to delete job');
       setJobs(prev => prev.filter(j => j.id !== id));
-    } catch {
-      setError('Failed to delete job');
+    } catch (err) {
+      setError(errorMessage(err, 'Failed to delete job'));
     } finally {
       setDeletingId(null);
     }
@@ -190,6 +197,18 @@ export function SavedJobsPanel({
         {loading ? (
           <div className="flex items-center justify-center py-8 text-muted-foreground">
             <Loader2 size={16} className="animate-spin mr-2" /> Loading…
+          </div>
+        ) : loadError ? (
+          <div className="px-3 py-6 text-center" role="alert">
+            <p className="text-xs text-red-600">{loadError}</p>
+            <button
+              type="button"
+              onClick={fetchJobs}
+              className="mt-3 inline-flex items-center gap-1.5 rounded border border-border bg-background px-2.5 py-1.5 text-xs font-medium hover:bg-muted transition-colors"
+            >
+              <RefreshCw size={12} />
+              Retry
+            </button>
           </div>
         ) : jobs.length === 0 ? (
           <div className="px-3 py-6 text-center text-xs text-muted-foreground">

@@ -4,6 +4,7 @@ import type { Mode } from '../types';
 import type { Units } from '../lib/units';
 import { unitLabel } from '../lib/units';
 import { BoardTypeSelector, type BoardType } from './BoardTypeSelector';
+import { NumericInput } from './NumericInput';
 
 interface PieceTableProps {
   mode: Mode;
@@ -50,7 +51,7 @@ export function PieceTable({ mode, units, pieces, showMaterial, onChange }: Piec
               data-piece={JSON.stringify({ length: p.length, width: p.width, qty: p.qty, label: p.label, material: p.material })}
             >
               <td>
-                <input
+                <NumericInput
                   className="cell-input"
                   value={p.length}
                   onChange={e => update(p.id, 'length', e.target.value)}
@@ -60,7 +61,7 @@ export function PieceTable({ mode, units, pieces, showMaterial, onChange }: Piec
               </td>
               {mode === 'sheet' && (
                 <td>
-                  <input
+                  <NumericInput
                     className="cell-input"
                     value={p.width}
                     onChange={e => update(p.id, 'width', e.target.value)}
@@ -70,7 +71,7 @@ export function PieceTable({ mode, units, pieces, showMaterial, onChange }: Piec
                 </td>
               )}
               <td>
-                <input
+                <NumericInput
                   className="cell-input"
                   value={p.qty}
                   onChange={e => update(p.id, 'qty', e.target.value)}
@@ -197,7 +198,7 @@ export function StockTable({ mode, units, stock, showMaterial, onChange }: Stock
               data-stock={JSON.stringify({ length: s.length, width: s.width, qty: s.qty, material: s.material })}
             >
               <td>
-                <input
+                <NumericInput
                   className="cell-input"
                   value={s.length}
                   onChange={e => update(s.id, 'length', e.target.value)}
@@ -207,7 +208,7 @@ export function StockTable({ mode, units, stock, showMaterial, onChange }: Stock
               </td>
               {mode === 'sheet' && (
                 <td>
-                  <input
+                  <NumericInput
                     className="cell-input"
                     value={s.width}
                     onChange={e => update(s.id, 'width', e.target.value)}
@@ -217,7 +218,7 @@ export function StockTable({ mode, units, stock, showMaterial, onChange }: Stock
                 </td>
               )}
               <td>
-                <input
+                <NumericInput
                   className="cell-input"
                   value={s.qty}
                   onChange={e => update(s.id, 'qty', e.target.value)}

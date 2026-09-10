@@ -42,6 +42,19 @@ export interface PlacedPiece {
   originalH: number;
 }
 
+export type GuillotineCutOrientation = 'horizontal' | 'vertical';
+
+export interface GuillotineCutStep {
+  number: number;
+  orientation: GuillotineCutOrientation;
+  x: number;
+  y: number;
+  x2: number;
+  y2: number;
+  span: number;
+  description: string;
+}
+
 export interface UsedSheet {
   stockId: string;
   stockIndex: number;
@@ -51,6 +64,7 @@ export interface UsedSheet {
   pieces: PlacedPiece[];
   wastePercent: number;
   material: string;
+  cutSequence: GuillotineCutStep[];
 }
 
 export interface SheetOptimizationResult {

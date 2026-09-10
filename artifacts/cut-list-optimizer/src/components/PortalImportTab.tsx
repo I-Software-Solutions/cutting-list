@@ -2,6 +2,7 @@ import { useState, useCallback } from 'react';
 import { Globe, Loader2, AlertCircle, CheckCircle2, AlertTriangle } from 'lucide-react';
 import type { CutPiece, StockItem, Mode } from '../types';
 import { checkPreviewRow } from '../lib/oversizeCheck';
+import { errorMessage, responseError } from '../lib/apiError';
 
 const API_BASE = import.meta.env.BASE_URL?.replace(/\/$/, '') ?? '';
 const PORTAL_KEY = 'clo-portal-url';
@@ -54,17 +55,15 @@ export function PortalImportTab({ onConfirm, onCancel }: Props) {
     setError(null);
     setJobs(null);
     try {
-      const res = await fetch(`${API_BASE}/api/iframer/cutting-list?portal=${encodeURIComponent(portal.trim())}&env=dev`);
+      const res = await fetch(`${API_BASE}/api/iframer/cutting-list?portal=${encodeURIComponent(portal.trim())}`);
+      if (!res.ok) throw await responseError(res, 'i-framer API request failed');
       const data = await res.json();
-      if (!res.ok || data.error) {
-        setError(data.error ?? `Request failed (${res.status})`);
-        return;
-      }
+      if (data.error) throw new Error(data.error);
       setFramerName(data.framer?.name ?? null);
       setJobs(data.jobs ?? []);
       setSelected(new Set((data.jobs ?? []).map((j: PortalJob) => j.jobId)));
-    } catch {
-      setError('Could not reach API');
+    } catch (err) {
+      setError(errorMessage(err, 'Could not reach the i-framer API'));
     } finally {
       setLoading(false);
     }

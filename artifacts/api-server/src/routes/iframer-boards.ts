@@ -19,7 +19,10 @@ function toMm(value: number, unit: string): number {
 function resolveEnvParam(req: any): "dev" | "beta" | "prod" {
   const e = req.query.env as string | undefined;
   if (e === "prod" || e === "beta" || e === "dev") return e;
-  return resolveEnv(req.query.serverType as string, req.query.portalUrl as string);
+  return resolveEnv(
+    req.query.serverType as string,
+    (req.query.portalUrl ?? req.query.portal) as string | undefined,
+  );
 }
 
 /** "thepictureframer.dev.i-framer.com" → "thepictureframer" */

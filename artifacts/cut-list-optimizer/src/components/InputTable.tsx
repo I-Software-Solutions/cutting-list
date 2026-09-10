@@ -162,7 +162,6 @@ export function StockTable({ mode, units, stock, showMaterial, onChange }: Stock
         <div className="flex items-center gap-2">
           <span className="text-xs text-muted-foreground whitespace-nowrap">Add board type:</span>
           <BoardTypeSelector
-            env="dev"
             type={stockType}
             placeholder="Search i-framer…"
             onSelect={(board) => {
@@ -236,7 +235,6 @@ export function StockTable({ mode, units, stock, showMaterial, onChange }: Stock
                       placeholder="Code"
                     />
                     <BoardTypeSelector
-                      env="dev"
                       type={stockType}
                       placeholder="…"
                       onSelect={(board) => applyBoardType(s.id, board)}

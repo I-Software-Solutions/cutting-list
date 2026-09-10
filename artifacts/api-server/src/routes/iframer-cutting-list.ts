@@ -8,7 +8,10 @@ const M_TO_MM = 1000;
 function resolveEnvParam(req: any): IframerEnv {
   const e = req.query.env as string | undefined;
   if (e === "prod" || e === "beta" || e === "dev") return e;
-  return resolveEnv(req.query.serverType as string, req.query.portalUrl as string);
+  return resolveEnv(
+    req.query.serverType as string,
+    (req.query.portalUrl ?? req.query.portal) as string | undefined,
+  );
 }
 
 /** Extract portal slug from a full URL or bare slug.

@@ -1,5 +1,11 @@
-import { optimizeSheets, retainBeamByOrder } from './optimizer';
+import {
+  optimizeSheets,
+  retainBeamByOrder,
+  type SheetSearchDiagnostics,
+} from './optimizer';
 import type { CutPiece, Options, StockItem } from '../types';
+
+const LARGE_JOB_MAX_OPERATIONS = 200_000;
 
 function test(name: string, fn: () => void) {
   try { fn(); console.log(`✓ ${name}`); } catch (e) {
@@ -16,6 +22,65 @@ const s = (id: string, length: string, width: string, qty = '1', material = ''):
   { return { id, length, width, qty, material }; };
 const result = (pieces: CutPiece[], stock: StockItem[], o = options()) =>
   optimizeSheets(pieces, stock, o, 'metric');
+
+function diagnosticResult(pieces: CutPiece[], stock: StockItem[], o = options()) {
+  const diagnostics: SheetSearchDiagnostics = {
+    operations: -1,
+    operationBudget: -1,
+    usedGreedyFallback: false,
+  };
+  const optimization = optimizeSheets(pieces, stock, o, 'metric', diagnostics);
+  return { optimization, diagnostics };
+}
+
+function stableSnapshot(r: ReturnType<typeof result>) {
+  return JSON.stringify({
+    totalSheets: r.totalSheets,
+    totalWastePercent: r.totalWastePercent,
+    unplacedCount: r.unplacedCount,
+    sheets: r.sheets.map(sheet => ({
+      stockId: sheet.stockId,
+      material: sheet.material,
+      pieces: sheet.pieces.map(piece => ({
+        pieceId: piece.pieceId,
+        pieceIndex: piece.pieceIndex,
+        x: piece.x,
+        y: piece.y,
+        w: piece.w,
+        h: piece.h,
+        rotated: piece.rotated,
+      })),
+    })),
+  });
+}
+
+function assertLargeJobRegression(
+  pieces: CutPiece[],
+  stock: StockItem[],
+  o: Options,
+) {
+  const first = diagnosticResult(pieces, stock, o);
+  const second = diagnosticResult(pieces, stock, o);
+  if (stableSnapshot(first.optimization) !== stableSnapshot(second.optimization)) {
+    throw new Error('large-job result changed between identical runs');
+  }
+  if (first.diagnostics.operations !== second.diagnostics.operations) {
+    throw new Error('large-job operation count changed between identical runs');
+  }
+  if (first.diagnostics.operationBudget !== LARGE_JOB_MAX_OPERATIONS) {
+    throw new Error(`search budget changed from regression limit: ${first.diagnostics.operationBudget}`);
+  }
+  if (first.diagnostics.operations > LARGE_JOB_MAX_OPERATIONS) {
+    throw new Error(`search exceeded budget: ${first.diagnostics.operations}`);
+  }
+  if (
+    first.diagnostics.usedGreedyFallback &&
+    first.diagnostics.operations !== LARGE_JOB_MAX_OPERATIONS
+  ) {
+    throw new Error(`search fell back before exhausting its budget: ${first.diagnostics.operations}`);
+  }
+  assertLayout(first.optimization);
+}
 
 function assertLayout(r: ReturnType<typeof result>, count = r.sheets.reduce((n, s) => n + s.pieces.length, 0)) {
   if (r.unplacedCount !== 0 || count === 0) throw new Error(`unplaced=${r.unplacedCount}`);
@@ -105,8 +170,9 @@ test('regression job fits one board', () => {
   assertExecutableCutPlan(r, 0);
 });
 test('is deterministic and respects stock quantity', () => {
-  const args = [[p('a', '700', '700', '2')], [s('x', '800', '800', '1')]] as const;
-  const a = result(...args), b = result(...args);
+  const pieces = [p('a', '700', '700', '2')];
+  const stock = [s('x', '800', '800', '1')];
+  const a = result(pieces, stock), b = result(pieces, stock);
   if (JSON.stringify(a) !== JSON.stringify(b) || a.unplacedCount !== 1) throw new Error('nondeterministic/stock');
 });
 test('kerf and material are respected', () => {
@@ -230,4 +296,36 @@ test('fallback places each requested piece at most once', () => {
     throw new Error(`wrong fallback multiplicity: ${identities.join(', ')}`);
   }
   assertExecutableCutPlan(r, 0);
+});
+test('large mixed-size job is deterministic and search-bounded with kerf and grain', () => {
+  const pieces = [
+    p('cabinet-side', '720', '560', '8', true),
+    p('shelf', '540', '300', '12'),
+    p('rail', '680', '110', '10', true),
+    p('drawer-front', '420', '180', '10'),
+    p('back-panel', '760', '400', '6', true),
+  ];
+  assertLargeJobRegression(
+    pieces,
+    [s('full-sheet', '2440', '1220', '20')],
+    options({ kerf: '3.2', considerGrain: true }),
+  );
+});
+test('large multi-material job is deterministic and search-bounded across stock quantities', () => {
+  const pieces = [
+    p('ply-side', '700', '500', '8', true, 'PLY'),
+    p('ply-shelf', '650', '280', '12', false, 'PLY'),
+    p('mdf-door', '600', '400', '10', true, 'MDF'),
+    p('mdf-trim', '900', '90', '12', false, 'MDF'),
+  ];
+  const stock = [
+    s('ply-sheet', '2440', '1220', '12', 'PLY'),
+    s('mdf-sheet', '2440', '1220', '10', 'MDF'),
+    s('mdf-half', '1220', '1220', '4', 'MDF'),
+  ];
+  assertLargeJobRegression(
+    pieces,
+    stock,
+    options({ kerf: '3', considerGrain: true, considerMaterial: true }),
+  );
 });

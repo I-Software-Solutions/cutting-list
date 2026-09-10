@@ -114,8 +114,16 @@ function optimizeSheetsGreedy(
   return { mode: 'sheet', sheets: output, totalSheets: output.length, totalWastePercent: total ? ((total - used) / total) * 100 : 0, unplacedCount: unplaced.length };
 }
 
-const SEARCH_BEAM_WIDTH = 512;
-const SEARCH_BUDGET = 200000;
+export const SHEET_SEARCH_LIMITS = {
+  beamWidth: 512,
+  operationBudget: 200000,
+} as const;
+
+export interface SheetSearchDiagnostics {
+  operations: number;
+  operationBudget: number;
+  usedGreedyFallback: boolean;
+}
 const SEARCH_ORDER_RESERVE_DIVISOR = 4;
 
 export function retainBeamByOrder<T extends { orderIndex: number }>(
@@ -185,7 +193,14 @@ export function optimizeSheets(
   stock: StockItem[],
   options: Options,
   units: Units,
+  diagnostics?: SheetSearchDiagnostics,
 ): SheetOptimizationResult {
+  const finishDiagnostics = (operations: number, usedGreedyFallback: boolean) => {
+    if (!diagnostics) return;
+    diagnostics.operations = operations;
+    diagnostics.operationBudget = SHEET_SEARCH_LIMITS.operationBudget;
+    diagnostics.usedGreedyFallback = usedGreedyFallback;
+  };
   const kerf = parseValue(options.kerf, units);
   const expanded: ExpandedSheetPiece[] = [];
   let invalidPiece = false;
@@ -206,7 +221,10 @@ export function optimizeSheets(
     w: parseValue(item.length, units),
     h: parseValue(item.width, units),
   }));
-  if (!expanded.length || invalidPiece) return optimizeSheetsGreedy(pieces, stock, options, units);
+  if (!expanded.length || invalidPiece) {
+    finishDiagnostics(0, true);
+    return optimizeSheetsGreedy(pieces, stock, options, units);
+  }
 
   let beam: SearchState[] = pieceOrders(expanded).map((remaining, orderIndex) => ({
     orderIndex,
@@ -229,7 +247,7 @@ export function optimizeSheets(
     cutSequence: s.cutSequence.map(c => ({ ...c })),
   });
 
-  while (beam.length && operations < SEARCH_BUDGET) {
+  while (beam.length && operations < SHEET_SEARCH_LIMITS.operationBudget) {
     const next: SearchState[] = [];
     for (const state of beam) {
       if (!state.remaining.length) { completed.push(state); continue; }
@@ -257,7 +275,8 @@ export function optimizeSheets(
                   leaves: [{ x: 0, y: 0, w: sv.w, h: sv.h }],
                 };
                 for (const topology of [0, 1] as const) {
-                  if (++operations > SEARCH_BUDGET) break;
+                  if (operations >= SHEET_SEARCH_LIMITS.operationBudget) break;
+                  operations++;
                   const candidate = cloneSheet(sh);
                   if (!placeSearch(candidate, -1, ep, pw, ph, rotated, kerf, topology)) continue;
                   const ns: SearchState = { orderIndex: state.orderIndex, remaining: state.remaining.filter(i => i !== pieceIndex), sheets: state.sheets.map(cloneSheet).concat(candidate), stockRemaining: state.stockRemaining.slice() };
@@ -270,30 +289,34 @@ export function optimizeSheets(
               if (options.considerMaterial && state.sheets[si].material !== ep.piece.material) continue;
               for (let li = 0; li < state.sheets[si].leaves.length; li++) {
                 for (const topology of [0, 1] as const) {
-                  if (++operations > SEARCH_BUDGET) break;
+                  if (operations >= SHEET_SEARCH_LIMITS.operationBudget) break;
+                  operations++;
                   const candidate = cloneSheet(state.sheets[si]);
                   if (!placeSearch(candidate, li, ep, pw, ph, rotated, kerf, topology)) continue;
                   const ns: SearchState = { orderIndex: state.orderIndex, remaining: state.remaining.filter(i => i !== pieceIndex), sheets: state.sheets.map((v, j) => j === si ? candidate : cloneSheet(v)), stockRemaining: state.stockRemaining.slice() };
                   if (!ns.remaining.length) completed.push(ns);
                   else next.push(ns);
                 }
-                if (operations > SEARCH_BUDGET) break;
+                if (operations >= SHEET_SEARCH_LIMITS.operationBudget) break;
               }
             }
-            if (operations > SEARCH_BUDGET) break;
+            if (operations >= SHEET_SEARCH_LIMITS.operationBudget) break;
           }
-          if (operations > SEARCH_BUDGET) break;
+          if (operations >= SHEET_SEARCH_LIMITS.operationBudget) break;
         }
-        if (operations > SEARCH_BUDGET) break;
+        if (operations >= SHEET_SEARCH_LIMITS.operationBudget) break;
       }
-      if (operations > SEARCH_BUDGET) break;
+      if (operations >= SHEET_SEARCH_LIMITS.operationBudget) break;
     }
     // All states in a generation have placed the same number of pieces, so
     // finish the generation before comparing completed layouts from each order.
     if (completed.length) break;
-    beam = retainBeamByOrder(next, SEARCH_BEAM_WIDTH, (a, b) => score(a) - score(b));
+    beam = retainBeamByOrder(next, SHEET_SEARCH_LIMITS.beamWidth, (a, b) => score(a) - score(b));
   }
-  if (!completed.length) return optimizeSheetsGreedy(pieces, stock, options, units);
+  if (!completed.length) {
+    finishDiagnostics(operations, true);
+    return optimizeSheetsGreedy(pieces, stock, options, units);
+  }
   const objective = (s: SearchState) => {
     const area = s.sheets.reduce((n, sh) => n + sh.stockW * sh.stockH, 0);
     const cuts = s.sheets.reduce((n, sh) => n + sh.cutSequence.length, 0);
@@ -317,6 +340,7 @@ export function optimizeSheets(
   });
   const totalArea = resultSheets.reduce((n, s) => n + s.stockW * s.stockH, 0);
   const usedArea = resultSheets.reduce((n, s) => n + s.pieces.reduce((a, p) => a + p.w * p.h, 0), 0);
+  finishDiagnostics(operations, false);
   return { mode: 'sheet', sheets: resultSheets, totalSheets: resultSheets.length, totalWastePercent: totalArea ? ((totalArea - usedArea) / totalArea) * 100 : 0, unplacedCount: 0 };
 }
 

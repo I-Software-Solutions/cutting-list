@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { ChevronDown, Search, Loader2, AlertCircle, X } from 'lucide-react';
+import { errorMessage, responseError } from '../lib/apiError';
 
 export interface BoardType {
   code: string;
@@ -28,7 +29,7 @@ function useDebounce<T>(value: T, delay: number): T {
   return debounced;
 }
 
-export function BoardTypeSelector({ env = 'dev', type = 'sheet', onSelect, placeholder = 'Search board type…' }: Props) {
+export function BoardTypeSelector({ env, type = 'sheet', onSelect, placeholder = 'Search board type…' }: Props) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<BoardType[]>([]);
@@ -57,9 +58,18 @@ export function BoardTypeSelector({ env = 'dev', type = 'sheet', onSelect, place
 
     // Scope search to the framer's portal (saved by the import dialog)
     const portal = localStorage.getItem('clo-portal-url') ?? '';
-    const url = `${API_BASE}/api/iframer/boards/search?q=${encodeURIComponent(debouncedQuery)}&type=${type}&env=${env}&portal=${encodeURIComponent(portal.trim())}`;
+    const params = new URLSearchParams({
+      q: debouncedQuery,
+      type,
+      portal: portal.trim(),
+    });
+    if (env) params.set('env', env);
+    const url = `${API_BASE}/api/iframer/boards/search?${params.toString()}`;
     fetch(url)
-      .then(r => r.json())
+      .then(async r => {
+        if (!r.ok) throw await responseError(r, 'i-framer board API request failed');
+        return r.json();
+      })
       .then(data => {
         if (cancelled) return;
         if (data.boards) {
@@ -69,8 +79,8 @@ export function BoardTypeSelector({ env = 'dev', type = 'sheet', onSelect, place
           setError(data.error ?? 'Failed to load boards');
         }
       })
-      .catch(() => {
-        if (!cancelled) setError('Could not reach API');
+      .catch((err) => {
+        if (!cancelled) setError(errorMessage(err, 'Could not reach the i-framer API'));
       })
       .finally(() => {
         if (!cancelled) setLoading(false);

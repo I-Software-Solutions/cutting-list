@@ -1,1 +1,3 @@
 - [i-framer DB quirks](iframer-db-quirks.md) — component cut dims stored in metres (×1000 for mm); cutting-list join goes via jobline shared PK; always filter big tables by FramerID/SaleID first.
+- [GitHub connector push](github-connector-push.md) — no raw token ever exposed; push via connectors-sdk proxy + Git Data API, throttle <10 RPS.
+- [External deployment](external-deployment.md) — production is self-hosted; Replit database status cannot diagnose the external server's database.

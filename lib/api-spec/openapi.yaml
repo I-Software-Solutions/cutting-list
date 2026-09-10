@@ -35,23 +35,99 @@ paths:
       parameters:
         - name: code
           in: query
-          required: true
+          required: false
           schema:
             type: string
-          description: Board code to look up (e.g. "3mm MDF" or "FBCT540X60")
+          description: Optional board code to look up (e.g. "3mm MDF" or "FBCT540X60"). Omit to list all boards.
       responses:
         "200":
           description: Board found
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/BoardRecord"
+                oneOf:
+                  - $ref: "#/components/schemas/BoardRecord"
+                  - type: array
+                    items:
+                      $ref: "#/components/schemas/BoardRecord"
         "404":
           description: Board not found
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/NotFound"
+    post:
+      operationId: createBoard
+      tags: [boards]
+      summary: Create a board stock record
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BoardInput"
+      responses:
+        "201":
+          description: Board created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BoardRecord"
+        "400":
+          description: Invalid board
+        "409":
+          description: Board code already exists
+  /boards/{id}:
+    put:
+      operationId: updateBoardById
+      tags: [boards]
+      summary: Update a board stock record by id
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BoardUpdate"
+      responses:
+        "200":
+          description: Board updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BoardRecord"
+        "404":
+          description: Board not found
+        "409":
+          description: Board code already exists
+    delete:
+      operationId: deleteBoard
+      tags: [boards]
+      summary: Delete a board stock record
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Board deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                required: [ok]
+        "404":
+          description: Board not found
 components:
   schemas:
     HealthStatus:
@@ -69,17 +145,41 @@ components:
         code:
           type: string
         description:
-          type: string
-          nullable: true
+          type: ["string", "null"]
         stock_length:
-          type: integer
-          nullable: true
+          type: ["integer", "null"]
         stock_width:
-          type: integer
-          nullable: true
+          type: ["integer", "null"]
       required:
         - id
         - code
+    BoardInput:
+      type: object
+      properties:
+        code:
+          type: string
+        description:
+          type: ["string", "null"]
+        stock_length:
+          type: ["integer", "null"]
+        stock_width:
+          type: ["integer", "null"]
+      required:
+        - code
+        - stock_length
+        - stock_width
+    BoardUpdate:
+      type: object
+      minProperties: 1
+      properties:
+        code:
+          type: string
+        description:
+          type: ["string", "null"]
+        stock_length:
+          type: ["integer", "null"]
+        stock_width:
+          type: ["integer", "null"]
     NotFound:
       type: object
       properties:

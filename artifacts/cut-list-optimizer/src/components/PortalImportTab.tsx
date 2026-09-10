@@ -1,6 +1,7 @@
 import { useState, useCallback } from 'react';
-import { Globe, Loader2, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { Globe, Loader2, AlertCircle, CheckCircle2, AlertTriangle } from 'lucide-react';
 import type { CutPiece, StockItem, Mode } from '../types';
+import { checkPreviewRow } from '../lib/oversizeCheck';
 
 const API_BASE = import.meta.env.BASE_URL?.replace(/\/$/, '') ?? '';
 const PORTAL_KEY = 'clo-portal-url';
@@ -78,6 +79,12 @@ export function PortalImportTab({ onConfirm, onCancel }: Props) {
   };
 
   const relevantPieceCount = (j: PortalJob) => j.pieces.filter(p => wantedKinds.has(p.kind)).length;
+
+  // Preview-time sanity check for piece dimensions coming from the portal.
+  // Stock sizes are only looked up during import, so only the ceiling applies.
+  const pieceWarning = (p: PortalPiece): string | null => checkPreviewRow(p.length, p.width, null);
+  const jobHasWarning = (j: PortalJob) => j.pieces.some(p => wantedKinds.has(p.kind) && pieceWarning(p) !== null);
+  const flaggedJobCount = (jobs ?? []).filter(jobHasWarning).length;
   const selectedJobs = (jobs ?? []).filter(j => selected.has(j.jobId) && relevantPieceCount(j) > 0);
   const totalPieces = selectedJobs.reduce((n, j) => n + relevantPieceCount(j), 0);
 
@@ -229,6 +236,16 @@ export function PortalImportTab({ onConfirm, onCancel }: Props) {
               </span>
             </div>
 
+            {flaggedJobCount > 0 && (
+              <div className="flex items-start gap-2 p-3 bg-amber-50 border border-amber-200 rounded text-xs text-amber-700">
+                <AlertTriangle size={13} className="shrink-0 mt-0.5" />
+                <span>
+                  {flaggedJobCount} job{flaggedJobCount !== 1 ? 's have' : ' has'} piece dimensions that look wrong
+                  (highlighted below). Untick those jobs to skip them, or import anyway and fix the sizes afterwards.
+                </span>
+              </div>
+            )}
+
             {jobs.length > 0 && (
               <div className="border border-gray-200 rounded overflow-hidden">
                 <table className="w-full text-xs">
@@ -251,10 +268,11 @@ export function PortalImportTab({ onConfirm, onCancel }: Props) {
                   <tbody className="divide-y divide-gray-100">
                     {jobs.map(j => {
                       const n = relevantPieceCount(j);
+                      const flagged = jobHasWarning(j);
                       return (
                         <tr
                           key={j.jobId}
-                          className={`hover:bg-gray-50 cursor-pointer ${n === 0 ? 'opacity-40' : ''}`}
+                          className={`cursor-pointer ${n === 0 ? 'opacity-40' : ''} ${flagged ? 'bg-amber-50 hover:bg-amber-100' : 'hover:bg-gray-50'}`}
                           onClick={() => n > 0 && toggleJob(j.jobId)}
                         >
                           <td className="px-2 py-1 text-center">
@@ -267,11 +285,19 @@ export function PortalImportTab({ onConfirm, onCancel }: Props) {
                           <td className="px-2 py-1 text-gray-500">
                             {n === 0
                               ? <span className="italic">no cuttable pieces</span>
-                              : j.pieces.filter(p => wantedKinds.has(p.kind)).map((p, i) => (
-                                  <span key={i} className="inline-block mr-2 whitespace-nowrap">
-                                    <span className="font-mono">{p.code}</span> {p.length}×{p.width}
-                                  </span>
-                                ))}
+                              : j.pieces.filter(p => wantedKinds.has(p.kind)).map((p, i) => {
+                                  const warning = pieceWarning(p);
+                                  return (
+                                    <span
+                                      key={i}
+                                      className={`inline-block mr-2 whitespace-nowrap ${warning ? 'text-amber-800 font-semibold' : ''}`}
+                                      title={warning ?? undefined}
+                                    >
+                                      <span className="font-mono">{p.code}</span> {p.length}×{p.width}
+                                      {warning && <AlertTriangle size={12} className="text-amber-500 inline-block ml-1 align-text-bottom" />}
+                                    </span>
+                                  );
+                                })}
                           </td>
                         </tr>
                       );

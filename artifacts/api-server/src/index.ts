@@ -1,11 +1,5 @@
 import app from "./app";
 import { logger } from "./lib/logger";
-import dotenv from "dotenv";
-
-dotenv.config({
-  path: "/home/replit/cutting-list/.env",
-  override: true,
-});
 
 const rawPort = process.env["PORT"];
 

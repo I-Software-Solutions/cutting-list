@@ -1,6 +1,8 @@
 import type { UsedSheet } from '../types';
 import type { Units } from '../lib/units';
 import { formatValue } from '../lib/units';
+import { useCutPlayback } from '../hooks/use-cut-playback';
+import { CutPlaybackPanel } from './CutPlaybackPanel';
 
 interface Props {
   sheet: UsedSheet;
@@ -13,7 +15,10 @@ const MAX_W = 520;
 const MAX_H = 380;
 
 export function SheetDiagram({ sheet, units, showLabels, index }: Props) {
-  const { stockW, stockH, pieces, wastePercent, sheetNum } = sheet;
+  const { stockW, stockH, pieces, wastePercent, sheetNum, cutSequence = [] } = sheet;
+  const playback = useCutPlayback(cutSequence);
+  const { currentIndex } = playback;
+
   if (!stockW || !stockH) return null;
 
   const scale = Math.min(MAX_W / stockW, MAX_H / stockH, 1);
@@ -32,23 +37,24 @@ export function SheetDiagram({ sheet, units, showLabels, index }: Props) {
   const showBottomStrip = remainBottom > 0.02 * stockH && remainBottom * scale > 20;
 
   return (
-    <div className="mb-6" data-result={JSON.stringify({ type: 'sheet', sheetNum, stockW, stockH, wastePercent: wastePercent.toFixed(1), pieceCount: pieces.length })}>
-      <div className="flex items-center justify-between mb-1.5 px-1">
-        <span className="text-sm font-medium text-foreground">
-          Sheet {sheetNum}
-          {sheet.material && <span className="ml-2 text-xs text-muted-foreground">({sheet.material})</span>}
-        </span>
-        <span className="text-xs text-muted-foreground">
-          {formatValue(stockW, units, 0)} × {formatValue(stockH, units, 0)} {ul} — waste: {wastePercent.toFixed(1)}%
-        </span>
-      </div>
-      <div className="overflow-auto">
-        <svg
-          width={dispW}
-          height={dispH}
-          viewBox={`0 0 ${dispW} ${dispH}`}
-          style={{ display: 'block', border: '1px solid hsl(var(--border))', background: '#e8e0d4' }}
-        >
+    <div className="mb-6 flex flex-col xl:flex-row gap-6 items-start" data-result={JSON.stringify({ type: 'sheet', sheetNum, stockW, stockH, wastePercent: wastePercent.toFixed(1), pieceCount: pieces.length })}>
+      <div className="flex-1 min-w-0 w-full overflow-hidden">
+        <div className="flex items-center justify-between mb-1.5 px-1">
+          <span className="text-sm font-medium text-foreground">
+            Sheet {sheetNum}
+            {sheet.material && <span className="ml-2 text-xs text-muted-foreground">({sheet.material})</span>}
+          </span>
+          <span className="text-xs text-muted-foreground">
+            {formatValue(stockW, units, 0)} × {formatValue(stockH, units, 0)} {ul} — waste: {wastePercent.toFixed(1)}%
+          </span>
+        </div>
+        <div className="overflow-auto border border-border rounded">
+          <svg
+            width={dispW}
+            height={dispH}
+            viewBox={`0 0 ${dispW} ${dispH}`}
+            style={{ display: 'block', background: '#e8e0d4' }}
+          >
           {/* Waste background */}
           <rect x={0} y={0} width={dispW} height={dispH} fill="#d6ccbc" />
 
@@ -186,8 +192,55 @@ export function SheetDiagram({ sheet, units, showLabels, index }: Props) {
 
           {/* Sheet border */}
           <rect x={0} y={0} width={dispW} height={dispH} fill="none" stroke="#8a7a6a" strokeWidth={1.5} />
+
+          {/* ── Cut Sequence Overlay ── */}
+          {currentIndex >= 0 && cutSequence.slice(0, currentIndex + 1).map((cut, idx) => {
+            const isCurrent = idx === currentIndex;
+            const x1 = cut.x * scale;
+            const y1 = cut.y * scale;
+            const x2 = cut.x2 * scale;
+            const y2 = cut.y2 * scale;
+            const cx = (x1 + x2) / 2;
+            const cy = (y1 + y2) / 2;
+
+            return (
+              <g key={`cut-${idx}`}>
+                <line
+                  x1={x1} y1={y1} x2={x2} y2={y2}
+                  stroke={isCurrent ? "hsl(var(--destructive))" : "hsl(var(--destructive) / 0.5)"}
+                  strokeWidth={isCurrent ? 3 : 1.5}
+                  strokeDasharray={isCurrent ? "6 4" : "4 2"}
+                  className={isCurrent ? "animate-pulse" : ""}
+                />
+                {isCurrent && (
+                  <g transform={`translate(${cx}, ${cy})`}>
+                    <circle r="10" fill="hsl(var(--destructive))" />
+                    <text
+                      x="0" y="1"
+                      textAnchor="middle" dominantBaseline="middle"
+                      fill="white" fontSize="11" fontWeight="bold"
+                    >
+                      {cut.number}
+                    </text>
+                  </g>
+                )}
+              </g>
+            );
+          })}
         </svg>
       </div>
     </div>
+
+    {/* Cut sequence playback */}
+    {cutSequence.length > 0 && (
+      <div className="w-full xl:w-80 flex-shrink-0 mt-6 xl:mt-0">
+        <CutPlaybackPanel
+          sequence={cutSequence}
+          units={units}
+          {...playback}
+        />
+      </div>
+    )}
+  </div>
   );
 }

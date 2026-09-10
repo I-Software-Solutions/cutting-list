@@ -1,4 +1,4 @@
-import { optimizeSheets } from './optimizer';
+import { optimizeSheets, retainBeamByOrder } from './optimizer';
 import type { CutPiece, Options, StockItem } from '../types';
 
 function test(name: string, fn: () => void) {
@@ -162,6 +162,20 @@ test('alternate piece order can select lower-waste stock', () => {
   }
   assertLayout(r, 5);
   assertExecutableCutPlan(r, 0);
+});
+test('beam retention reserves capacity for every active piece order', () => {
+  const candidates = [
+    ...Array.from({ length: 20 }, (_, rank) => ({ orderIndex: 0, rank })),
+    { orderIndex: 1, rank: 100 },
+    { orderIndex: 2, rank: 200 },
+  ];
+  const retained = retainBeamByOrder(candidates, 8, (a, b) => a.rank - b.rank);
+  if (retained.length !== 8) throw new Error(`expected fixed beam width, got ${retained.length}`);
+  for (const orderIndex of [0, 1, 2]) {
+    if (!retained.some(candidate => candidate.orderIndex === orderIndex)) {
+      throw new Error(`piece order ${orderIndex} was starved by a larger branch count`);
+    }
+  }
 });
 test('cut sequence is numbered, geometric, and parent-before-child', () => {
   const r = result([p('a', '400', '300'), p('b', '300', '300')], [s('x', '800', '600')], options({ useOneSheet: true }));

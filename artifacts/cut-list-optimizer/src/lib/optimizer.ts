@@ -44,6 +44,7 @@ interface SearchSheet extends UsedSheet {
   leaves: SearchLeaf[];
 }
 interface SearchState {
+  orderIndex: number;
   remaining: number[];
   sheets: SearchSheet[];
   stockRemaining: number[];
@@ -115,6 +116,41 @@ function optimizeSheetsGreedy(
 
 const SEARCH_BEAM_WIDTH = 512;
 const SEARCH_BUDGET = 200000;
+const SEARCH_ORDER_RESERVE_DIVISOR = 4;
+
+export function retainBeamByOrder<T extends { orderIndex: number }>(
+  candidates: T[],
+  beamWidth: number,
+  compare: (a: T, b: T) => number,
+): T[] {
+  if (candidates.length <= beamWidth) return candidates.slice().sort(compare);
+
+  const byOrder = new Map<number, T[]>();
+  for (const candidate of candidates) {
+    const group = byOrder.get(candidate.orderIndex);
+    if (group) group.push(candidate);
+    else byOrder.set(candidate.orderIndex, [candidate]);
+  }
+
+  const orderIndices = [...byOrder.keys()].sort((a, b) => a - b);
+  const reservePerOrder = Math.max(
+    1,
+    Math.floor(beamWidth / (orderIndices.length * SEARCH_ORDER_RESERVE_DIVISOR)),
+  );
+  const retained = new Set<T>();
+  for (const orderIndex of orderIndices) {
+    const group = byOrder.get(orderIndex)!;
+    group.sort(compare);
+    for (const candidate of group.slice(0, reservePerOrder)) retained.add(candidate);
+  }
+
+  const globallyRanked = candidates.slice().sort(compare);
+  for (const candidate of globallyRanked) {
+    if (retained.size >= beamWidth) break;
+    retained.add(candidate);
+  }
+  return [...retained].sort(compare);
+}
 
 function pieceOrders(expanded: ExpandedSheetPiece[]): number[][] {
   const indices = expanded.map((_, index) => index);
@@ -172,7 +208,8 @@ export function optimizeSheets(
   }));
   if (!expanded.length || invalidPiece) return optimizeSheetsGreedy(pieces, stock, options, units);
 
-  let beam: SearchState[] = pieceOrders(expanded).map(remaining => ({
+  let beam: SearchState[] = pieceOrders(expanded).map((remaining, orderIndex) => ({
+    orderIndex,
     remaining,
     sheets: [],
     stockRemaining: stockValues.map(s => s.qty),
@@ -223,7 +260,7 @@ export function optimizeSheets(
                   if (++operations > SEARCH_BUDGET) break;
                   const candidate = cloneSheet(sh);
                   if (!placeSearch(candidate, -1, ep, pw, ph, rotated, kerf, topology)) continue;
-                  const ns: SearchState = { remaining: state.remaining.filter(i => i !== pieceIndex), sheets: state.sheets.map(cloneSheet).concat(candidate), stockRemaining: state.stockRemaining.slice() };
+                  const ns: SearchState = { orderIndex: state.orderIndex, remaining: state.remaining.filter(i => i !== pieceIndex), sheets: state.sheets.map(cloneSheet).concat(candidate), stockRemaining: state.stockRemaining.slice() };
                   ns.stockRemaining[stockIndex]--;
                   if (!ns.remaining.length) completed.push(ns);
                   else next.push(ns);
@@ -236,7 +273,7 @@ export function optimizeSheets(
                   if (++operations > SEARCH_BUDGET) break;
                   const candidate = cloneSheet(state.sheets[si]);
                   if (!placeSearch(candidate, li, ep, pw, ph, rotated, kerf, topology)) continue;
-                  const ns: SearchState = { remaining: state.remaining.filter(i => i !== pieceIndex), sheets: state.sheets.map((v, j) => j === si ? candidate : cloneSheet(v)), stockRemaining: state.stockRemaining.slice() };
+                  const ns: SearchState = { orderIndex: state.orderIndex, remaining: state.remaining.filter(i => i !== pieceIndex), sheets: state.sheets.map((v, j) => j === si ? candidate : cloneSheet(v)), stockRemaining: state.stockRemaining.slice() };
                   if (!ns.remaining.length) completed.push(ns);
                   else next.push(ns);
                 }
@@ -254,8 +291,7 @@ export function optimizeSheets(
     // All states in a generation have placed the same number of pieces, so
     // finish the generation before comparing completed layouts from each order.
     if (completed.length) break;
-    next.sort((a, b) => score(a) - score(b));
-    beam = next.slice(0, SEARCH_BEAM_WIDTH);
+    beam = retainBeamByOrder(next, SEARCH_BEAM_WIDTH, (a, b) => score(a) - score(b));
   }
   if (!completed.length) return optimizeSheetsGreedy(pieces, stock, options, units);
   const objective = (s: SearchState) => {

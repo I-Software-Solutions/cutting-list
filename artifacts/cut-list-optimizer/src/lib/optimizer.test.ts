@@ -125,6 +125,44 @@ test('one-sheet completion beats an earlier two-sheet completion', () => {
   const r = result([p('a', '400', '400', '2')], [s('x', '800', '400', '2')], options());
   if (r.totalSheets !== 1 || r.unplacedCount !== 0) throw new Error('did not minimize sheets');
 });
+test('alternate piece order can reduce the required sheet count', () => {
+  const r = result([
+    p('a', '100', '100'),
+    p('b', '350', '200'),
+    p('c', '450', '150'),
+    p('d', '100', '150'),
+    p('e', '200', '400'),
+    p('f', '300', '250'),
+  ], [s('sheet', '600', '600', '2')], options());
+  if (r.totalSheets !== 1 || r.unplacedCount !== 0) {
+    throw new Error(`expected alternate ordering to fit one sheet, got ${r.totalSheets}`);
+  }
+  if (r.sheets[0].pieces[0].pieceId === 'e') {
+    throw new Error('area-descending order unexpectedly won the regression fixture');
+  }
+  assertLayout(r, 6);
+  assertExecutableCutPlan(r, 0);
+});
+test('alternate piece order can select lower-waste stock', () => {
+  const r = result([
+    p('a', '450', '150'),
+    p('b', '300', '150'),
+    p('c', '250', '300'),
+    p('d', '400', '100'),
+    p('e', '350', '150'),
+  ], [
+    s('small', '600', '500'),
+    s('large', '700', '600'),
+  ], options());
+  if (r.totalSheets !== 1 || r.unplacedCount !== 0 || r.sheets[0].stockId !== 'small') {
+    throw new Error('did not select the lower-waste stock');
+  }
+  if (Math.abs(r.totalWastePercent - 6.6666666667) > 1e-7) {
+    throw new Error(`wrong waste: ${r.totalWastePercent}`);
+  }
+  assertLayout(r, 5);
+  assertExecutableCutPlan(r, 0);
+});
 test('cut sequence is numbered, geometric, and parent-before-child', () => {
   const r = result([p('a', '400', '300'), p('b', '300', '300')], [s('x', '800', '600')], options({ useOneSheet: true }));
   assertLayout(r);

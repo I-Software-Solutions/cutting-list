@@ -49,6 +49,14 @@ interface SearchState {
   stockRemaining: number[];
 }
 
+interface ExpandedSheetPiece {
+  piece: CutPiece;
+  idx: number;
+  colorIdx: number;
+  w: number;
+  h: number;
+}
+
 function optimizeSheetsGreedy(
   pieces: CutPiece[], stock: StockItem[], options: Options, units: Units,
 ): SheetOptimizationResult {
@@ -108,6 +116,29 @@ function optimizeSheetsGreedy(
 const SEARCH_BEAM_WIDTH = 512;
 const SEARCH_BUDGET = 200000;
 
+function pieceOrders(expanded: ExpandedSheetPiece[]): number[][] {
+  const indices = expanded.map((_, index) => index);
+  const stable = (compare: (a: ExpandedSheetPiece, b: ExpandedSheetPiece) => number) =>
+    indices.slice().sort((ai, bi) =>
+      compare(expanded[ai], expanded[bi]) ||
+      expanded[ai].piece.id.localeCompare(expanded[bi].piece.id) ||
+      expanded[ai].idx - expanded[bi].idx);
+  const orders = [
+    stable((a, b) => b.w * b.h - a.w * a.h),
+    stable((a, b) => Math.max(b.w, b.h) - Math.max(a.w, a.h) || Math.min(b.w, b.h) - Math.min(a.w, a.h)),
+    stable((a, b) => b.w - a.w || b.h - a.h),
+    stable((a, b) => b.h - a.h || b.w - a.w),
+    stable((a, b) => (b.w + b.h) - (a.w + a.h) || b.w * b.h - a.w * a.h),
+  ];
+  const seen = new Set<string>();
+  return orders.filter(order => {
+    const key = order.join(',');
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 /**
  * Bounded guillotine beam search.  Every placement replaces one leaf with the
  * two children of a straight cut pair, so the emitted sequence is always a
@@ -120,7 +151,7 @@ export function optimizeSheets(
   units: Units,
 ): SheetOptimizationResult {
   const kerf = parseValue(options.kerf, units);
-  const expanded: Array<{ piece: CutPiece; idx: number; colorIdx: number; w: number; h: number }> = [];
+  const expanded: ExpandedSheetPiece[] = [];
   let invalidPiece = false;
   let color = 0;
   for (const piece of pieces) {
@@ -133,7 +164,6 @@ export function optimizeSheets(
     }
     color++;
   }
-  expanded.sort((a, b) => (b.w * b.h - a.w * a.h) || a.piece.id.localeCompare(b.piece.id) || a.idx - b.idx);
   const stockValues = stock.map(item => ({
     item,
     qty: Math.max(1, parseInt(item.qty) || 1),
@@ -142,12 +172,11 @@ export function optimizeSheets(
   }));
   if (!expanded.length || invalidPiece) return optimizeSheetsGreedy(pieces, stock, options, units);
 
-  const initial: SearchState = {
-    remaining: expanded.map((_, i) => i),
+  let beam: SearchState[] = pieceOrders(expanded).map(remaining => ({
+    remaining,
     sheets: [],
     stockRemaining: stockValues.map(s => s.qty),
-  };
-  let beam: SearchState[] = [initial];
+  }));
   let operations = 0;
   const completed: SearchState[] = [];
 
@@ -167,8 +196,8 @@ export function optimizeSheets(
     const next: SearchState[] = [];
     for (const state of beam) {
       if (!state.remaining.length) { completed.push(state); continue; }
-      // Keep the order deterministic.  Search still branches over every
-      // available leaf, orientation, and guillotine topology.
+      // Each seed has a different deterministic piece order. Search still
+      // branches over every leaf, orientation, and guillotine topology.
       const choices = state.remaining.slice(0, 1);
       for (const pieceIndex of choices) {
         const ep = expanded[pieceIndex];
@@ -222,6 +251,8 @@ export function optimizeSheets(
       }
       if (operations > SEARCH_BUDGET) break;
     }
+    // All states in a generation have placed the same number of pieces, so
+    // finish the generation before comparing completed layouts from each order.
     if (completed.length) break;
     next.sort((a, b) => score(a) - score(b));
     beam = next.slice(0, SEARCH_BEAM_WIDTH);
